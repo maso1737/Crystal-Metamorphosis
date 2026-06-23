@@ -8,6 +8,13 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { state, PRESETS } from './state.js';
 import { CUTS, CUT_IDS, cutGeometry } from './geometry/cuts.js';
+// GLSL fragment shaders (?raw = 静的文字列として取り込み。エディタで .frag 補完が効く)
+import bgFrag          from './shaders/bg.frag?raw';
+import envFrag         from './shaders/env.frag?raw';
+import streakFrag      from './shaders/streak.frag?raw';
+import dofFrag         from './shaders/dof.frag?raw';
+import nearExtractFrag from './shaders/nearExtract.frag?raw';
+import nearBlurFrag    from './shaders/nearBlur.frag?raw';
 
 // ============================================================
 // ★ Renderer
@@ -35,16 +42,7 @@ scene.background = new THREE.Color(0x05081a);
     depthWrite: false, depthTest: false,
     uniforms: { uTime: { value: 0 } },
     vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.999, 1.0); }`,
-    fragmentShader: `
-      varying vec2 vUv; uniform float uTime;
-      void main(){
-        vec2 p = vUv - 0.5; float r = length(p);
-        vec3 c1 = vec3(0.012,0.022,0.055); vec3 c2 = vec3(0.035,0.06,0.14); vec3 c3 = vec3(0.07,0.12,0.26);
-        float t = sin(uTime*0.04)*0.5+0.5;
-        vec3 col = mix(c2,c1,smoothstep(0.0,0.9,r));
-        col += c3*0.32*smoothstep(0.7,0.0,r)*(0.6+t*0.4);
-        gl_FragColor = vec4(col,1.0);
-      }`
+    fragmentShader: bgFrag
   });
   const bg = new THREE.Mesh(bgGeo, bgMat);
   bg.frustumCulled = false; bg.renderOrder = -1000;
@@ -72,28 +70,7 @@ function makeProceduralEnvMap(rotY = 0) {
     side: THREE.BackSide,
     uniforms: { uRot: { value: rotY } },
     vertexShader: `varying vec3 vPos; void main(){ vPos = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-    fragmentShader: `
-      varying vec3 vPos; uniform float uRot;
-      float hash(vec3 p){ return fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453); }
-      void main(){
-        vec3 n = normalize(vPos);
-        float c = cos(uRot), s = sin(uRot);
-        n = vec3(c*n.x+s*n.z, n.y, -s*n.x+c*n.z);
-        float y = n.y; vec3 col = vec3(0.0);
-        col += vec3(0.012,0.022,0.05)*(0.5+0.5*y);
-        for(int i=0;i<4;i++){
-          float fi=float(i); float bandY=-0.6+fi*0.45; float d=abs(y-bandY);
-          float band=smoothstep(0.018,0.0,d);
-          vec3 tint; if(i==0)tint=vec3(2.5,3.0,4.5); else if(i==1)tint=vec3(3.5,3.0,5.0); else if(i==2)tint=vec3(3.0,4.0,3.5); else tint=vec3(4.0,3.5,2.5);
-          col+=band*tint*0.8;
-        }
-        float h1=hash(floor(n*18.0)); col+=vec3(8.0,8.0,9.0)*smoothstep(0.995,1.0,h1);
-        float h2=hash(floor(n*80.0)); col+=vec3(3.0,3.2,4.0)*smoothstep(0.992,1.0,h2);
-        float h3=hash(floor(n*300.0)); col+=vec3(1.5,1.5,1.8)*smoothstep(0.998,1.0,h3);
-        float r=atan(n.z,n.x);
-        col+=0.08*vec3(sin(r*3.0),sin(r*3.0+2.0),sin(r*3.0+4.0))*smoothstep(0.6,0.95,abs(y));
-        gl_FragColor=vec4(col,1.0);
-      }`
+    fragmentShader: envFrag
   });
   envScene.add(new THREE.Mesh(new THREE.SphereGeometry(50,64,32), envMat));
   const cubeCam = new THREE.CubeCamera(0.1, 100, rt);
@@ -462,38 +439,7 @@ composer.addPass(bloomPass);
 const streakShader={
   uniforms:{tDiffuse:{value:null},uStreak:{value:0.4},uTime:{value:0},uRes:{value:new THREE.Vector2(1,1)}},
   vertexShader:`varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
-  fragmentShader:`
-    uniform sampler2D tDiffuse; uniform float uStreak,uTime; uniform vec2 uRes; varying vec2 vUv;
-    vec3 bright(vec3 c){float lum=max(c.r,max(c.g,c.b));return c*smoothstep(0.7,1.05,lum);}
-    // Continuous streak: 24 taps with sub-step spacing so adjacent samples
-    // overlap even at low (preview) resolution → no gridding / banding.
-    vec3 sDir(vec2 uv,vec2 step,int n){
-      vec3 a=vec3(0.0); float w=0.0;
-      for(int i=1;i<=24;i++){
-        if(i>n) break;
-        float fi=float(i);
-        float ww=exp(-fi*0.16);
-        a+=bright(texture2D(tDiffuse,uv+step*fi).rgb)*ww;
-        a+=bright(texture2D(tDiffuse,uv-step*fi).rgb)*ww;
-        w+=2.0*ww;
-      }
-      return a/max(w,0.001);
-    }
-    void main(){
-      vec3 base=texture2D(tDiffuse,vUv).rgb;
-      if(uStreak<0.01){gl_FragColor=vec4(base,1.0);return;}
-      // Step length is a fixed fraction of screen height → resolution-stable.
-      // Using a small per-tap step (1.5px-equivalent) keeps samples contiguous.
-      float aspect = uRes.x/uRes.y;
-      float L = (1.0/uRes.y) * (1.2 + uStreak*2.5);
-      vec2 dH = vec2(L/aspect, 0.0);
-      vec2 dV = vec2(0.0, L);
-      vec2 dD1 = vec2(L*0.707/aspect, L*0.707);
-      vec2 dD2 = vec2(L*0.707/aspect, -L*0.707);
-      vec3 s = (sDir(vUv,dH,22)+sDir(vUv,dV,22))*1.4
-             + (sDir(vUv,dD1,16)+sDir(vUv,dD2,16))*0.7;
-      gl_FragColor=vec4(base+s*vec3(1.0,1.05,1.2)*uStreak*0.9,1.0);
-    }`
+  fragmentShader:streakFrag
 };
 const streakPass=new ShaderPass(streakShader);
 composer.addPass(streakPass);
@@ -529,138 +475,7 @@ const dofShader={
     uEnabled:{value:1.0},
   },
   vertexShader:`varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
-  fragmentShader:`
-    uniform sampler2D tDiffuse, tDepth, uNearTex;
-    uniform vec2 uRes;
-    uniform float uFocusDist, uFocalLen, uFstop, uMaxBlur, uCA, uNearBleed, uNearOn, uNear, uFar, uEnabled;
-    varying vec2 vUv;
-
-    #define TAPS 48
-    #define GOLDEN 2.39996323  // golden angle (radians)
-
-    float linearizeDepth(float d){
-      float z = d * 2.0 - 1.0;
-      return (2.0 * uNear * uFar) / (uFar + uNear - z * (uFar - uNear));
-    }
-
-    // Thin-lens signed CoC (in arbitrary screen units, scaled by uMaxBlur).
-    // C = f^2 / (N (Uf - f)) * (D - Uf)/D   (sign kept: + bg, - fg)
-    float computeCoC(float D){
-      float f = uFocalLen;
-      float Uf = uFocusDist;
-      float denom = uFstop * max(Uf - f, 0.001);
-      float coc = (f * f / denom) * ((D - Uf) / max(D, 0.001));
-      // Normalize to a sensible screen pixel scale
-      return coc * 600.0 * uMaxBlur;
-    }
-
-    // Hex aperture warp: shrink radius toward hex edges so the kernel
-    // outline is a hexagon, not a circle.
-    float hexWarp(float ang){
-      return 1.0 / max(cos(mod(ang, 1.0471975512) - 0.5235987756), 0.5);
-    }
-    // cheap per-pixel hash → random spiral rotation, breaks up grid aliasing
-    float hash21(vec2 p){
-      p = fract(p * vec2(123.34, 456.21));
-      p += dot(p, p + 45.32);
-      return fract(p.x * p.y);
-    }
-
-    void main(){
-      vec3 base = texture2D(tDiffuse, vUv).rgb;
-      if(uEnabled < 0.5){ gl_FragColor = vec4(base, 1.0); return; }
-
-      vec2 texel = 1.0 / uRes;
-      float centerD = linearizeDepth(texture2D(tDepth, vUv).r);
-      float centerCoC = computeCoC(centerD);
-      float centerBlur = abs(centerCoC);
-
-      // ============================================================
-      // ★ FOREGROUND (near-field) layer — Dual-Layer DoF
-      // ------------------------------------------------------------
-      // The gather loop below can only blur a pixel that is itself out of
-      // focus, so a sharp BG pixel just outside a blurred foreground gem
-      // stays crisp → hard silhouette. Fix: a separate near-field layer is
-      // rendered (foreground pixels only), blurred AND dilated at half-res in
-      // earlier passes, and supplied here as uNearTex (premultiplied rgb,
-      // a = dilated coverage). We composite it OVER the gather result, so a
-      // near gem's colour genuinely spreads past its own outline — smoothly,
-      // no per-pixel grain.
-      vec4 nf = uNearOn > 0.5 ? texture2D(uNearTex, vUv) : vec4(0.0);
-      vec3 nearAvg = nf.a > 0.0001 ? nf.rgb / nf.a : base; // un-premultiply
-      float nearAmount = clamp(nf.a * uNearBleed, 0.0, 1.0);
-
-      // Search radius in pixels, clamped so huge bokeh doesn't tank FPS.
-      float maxR = clamp(centerBlur, 0.0, 40.0);
-
-      // Fully sharp pixel with no self-blur → still composite any foreground
-      // that bled onto it, then early out.
-      if(maxR < 0.75){
-        gl_FragColor = vec4(mix(base, nearAvg, nearAmount), 1.0);
-        return;
-      }
-
-      // Random rotation per pixel → spiral taps don't align into a grid
-      float jitter = hash21(vUv * uRes) * 6.28318530718;
-
-      vec3 colR = base, colG = base, colB = base; // start with center (energy)
-      float wsum = 1.0;
-      vec3 runningAvg = base; // current-average injection target
-
-      for(int i = 0; i < TAPS; i++){
-        float fi = float(i) + 0.5;
-        float r = sqrt(fi / float(TAPS));      // even area distribution
-        float ang = fi * GOLDEN + jitter;      // Vogel spiral + per-pixel rotation
-        float hr = r * hexWarp(ang);           // hexagonal aperture
-        vec2 dir = vec2(cos(ang), sin(ang));
-
-        // Sample CoC at this tap to decide its influence
-        vec2 baseOff = dir * hr * maxR * texel;
-        float sampD = linearizeDepth(texture2D(tDepth, vUv + baseOff).r);
-        float sampCoC = computeCoC(sampD);
-
-        // Scatter-as-Gather clamp: limit how much a background sample can
-        // blur into a sharp foreground pixel.
-        float effCoC = min(abs(sampCoC), centerBlur * 2.0 + 1.0);
-
-        // This tap only contributes if its blur radius reaches the center.
-        float spread = abs(sampCoC) * maxR;
-        float reach = r * maxR;
-        float wInRange = step(reach, max(spread, centerBlur));
-
-        // Chromatic aberration: offset radius per channel
-        vec2 offR = dir * hr * (1.0 + uCA * 0.05) * effCoC * texel;
-        vec2 offG = dir * hr * effCoC * texel;
-        vec2 offB = dir * hr * (1.0 - uCA * 0.05) * effCoC * texel;
-
-        vec3 sR = texture2D(tDiffuse, vUv + offR).rgb;
-        vec3 sG = texture2D(tDiffuse, vUv + offG).rgb;
-        vec3 sB = texture2D(tDiffuse, vUv + offB).rgb;
-
-        // Energy conservation: in-range → real sample, out-of-range →
-        // inject running average (keeps boundaries from going dark).
-        float w = mix(0.8, 1.25, r); // outer taps weighted up → bright edge
-        colR += mix(runningAvg, sR, wInRange).r * w;
-        colG += mix(runningAvg, sG, wInRange).g * w;
-        colB += mix(runningAvg, sB, wInRange).b * w;
-        wsum += w;
-        runningAvg = vec3(colR.r, colG.g, colB.b) / wsum;
-      }
-
-      vec3 dofColor = vec3(colR.r, colG.g, colB.b) / wsum;
-      // Blend sharp→blur by center blur amount
-      float blend = smoothstep(0.5, 3.0, centerBlur);
-      vec3 outc = mix(base, dofColor, blend);
-      // ★ foreground bleed composites OVER self/far blur (soft silhouettes)
-      outc = mix(outc, nearAvg, nearAmount);
-
-      // gentle vignette
-      float vig = smoothstep(1.0, 0.3, length(vUv - 0.5));
-      outc *= mix(0.82, 1.0, vig);
-
-      gl_FragColor = vec4(outc, 1.0);
-    }
-  `
+  fragmentShader:dofFrag
 };
 const dofPass=new ShaderPass(dofShader);
 dofPass.uniforms.tDepth.value=sceneDepth;
@@ -707,24 +522,7 @@ const nearExtractMat=new THREE.ShaderMaterial({
     uMaxBlur:{value:1.0}, uNear:{value:0.1}, uFar:{value:200.0},
   },
   vertexShader:_fsVert,
-  fragmentShader:`
-    uniform sampler2D tScene, tDepth;
-    uniform float uFocusDist, uFocalLen, uFstop, uMaxBlur, uNear, uFar;
-    varying vec2 vUv;
-    float linD(float d){ float z=d*2.0-1.0; return (2.0*uNear*uFar)/(uFar+uNear-z*(uFar-uNear)); }
-    float coc(float D){
-      float f=uFocalLen, Uf=uFocusDist;
-      float denom=uFstop*max(Uf-f,0.001);
-      return (f*f/denom)*((D-Uf)/max(D,0.001))*600.0*uMaxBlur;
-    }
-    void main(){
-      float D=linD(texture2D(tDepth,vUv).r);
-      float c=coc(D);                  // + far / - near
-      float nearCoC=max(-c,0.0);       // foreground magnitude
-      float cov=smoothstep(1.0,7.0,nearCoC); // ramp in only clearly-foreground px
-      vec3 col=texture2D(tScene,vUv).rgb;
-      gl_FragColor=vec4(col*cov, cov); // premultiplied
-    }`
+  fragmentShader:nearExtractFrag
 });
 
 // Pass 2: separable premultiplied gaussian (9-tap). Blurring alpha dilates.
@@ -735,24 +533,7 @@ const nearBlurMat=new THREE.ShaderMaterial({
     uDir:{value:new THREE.Vector2(1,0)}, uRadius:{value:8.0},
   },
   vertexShader:_fsVert,
-  fragmentShader:`
-    uniform sampler2D tInput;
-    uniform vec2 uTexel, uDir;
-    uniform float uRadius;
-    varying vec2 vUv;
-    void main(){
-      // 9-tap gaussian, step scaled so the kernel spans uRadius px
-      float w[5];
-      w[0]=0.227027; w[1]=0.194594; w[2]=0.121622; w[3]=0.054054; w[4]=0.016216;
-      vec2 step=uDir*uTexel*(uRadius/4.0);
-      vec4 acc=texture2D(tInput,vUv)*w[0];
-      for(int i=1;i<5;i++){
-        vec2 o=step*float(i);
-        acc+=texture2D(tInput,vUv+o)*w[i];
-        acc+=texture2D(tInput,vUv-o)*w[i];
-      }
-      gl_FragColor=acc;
-    }`
+  fragmentShader:nearBlurFrag
 });
 
 // Run extract → blur(H,V) ×2 iterations. Result left in nearRTA.
