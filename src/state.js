@@ -11,7 +11,7 @@ export const state = {
   modeTime:[0,0,0,0],
   modeSpeed:[1.0, 0.15, 1.0, 1.0], // rise, slow, burst, rain
   bpm:128, lastBeatIdx:-1, burstTime:-10,
-  streak:0.4, bloom:0.5,
+  streak:0.4, streakCross:0.7, bloom:0.5,
   density:0.5, gemSize:1.4, sizeCurve:1.5,
   geometryN:12, shape:'diamond', mixEnabled:false,
   dispersion:5.0, ior:2.4, thickness:2.0, attenuation:3.0, attenColor:'#ffffff',

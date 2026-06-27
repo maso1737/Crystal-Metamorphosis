@@ -414,7 +414,7 @@ const bloomPass=new UnrealBloomPass(new THREE.Vector2(window.innerWidth,window.i
 composer.addPass(bloomPass);
 
 const streakShader={
-  uniforms:{tDiffuse:{value:null},uStreak:{value:0.4},uTime:{value:0},uRes:{value:new THREE.Vector2(1,1)}},
+  uniforms:{tDiffuse:{value:null},uStreak:{value:0.4},uCross:{value:0.7},uTime:{value:0},uRes:{value:new THREE.Vector2(1,1)}},
   vertexShader:`varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
   fragmentShader:streakFrag
 };
@@ -591,6 +591,7 @@ slider('envrotate','envRotate',v=>{
 slider('fov','camFov',v=>{camFov=v; camera.fov=v; camera.updateProjectionMatrix(); document.getElementById('fov-val').textContent=Math.round(v);});
 slider('camdist','camDist',v=>{camDist=v; document.getElementById('camdist-val').textContent=Math.round(v);});
 slider('streak','streak');
+slider('streakcross','streakCross',v=>{streakPass.uniforms.uCross.value=v;});
 slider('bloom','bloom',v=>{bloomPass.strength=v;});
 slider('exposure','exposure');
 
@@ -840,6 +841,7 @@ function syncUI(){
   set('envint',s.envIntensity); set('bgblur',s.bgBlur);
   document.getElementById('bg-from-env').checked=s.bgFromEnv;
   set('streak',s.streak); set('exposure',s.exposure);
+  set('streakcross', s.streakCross!==undefined?s.streakCross:0.7); streakPass.uniforms.uCross.value=(s.streakCross!==undefined?s.streakCross:0.7);
   set('fstop',s.fstop); set('maxblur',s.maxBlur); set('ca',s.ca); set('nearbleed',s.nearBleed);
   set('hexshape', s.hexShape!==undefined?s.hexShape:1.0);
   set('hexsharp', s.hexSharp!==undefined?s.hexSharp:2.2);
@@ -864,7 +866,7 @@ function paramsToObj(){
     geometryN:state.geometryN,shape:state.shape,mixEnabled:mixEnabled,mixSet:mixSet.slice(),
     envIntensity:state.envIntensity,bgBlur:state.bgBlur,bgFromEnv:state.bgFromEnv,
     fstop:state.fstop,focalLen:state.focalLen,maxBlur:state.maxBlur,ca:state.ca,nearBleed:state.nearBleed,focusDist:state.focusDist,hexShape:state.hexShape,hexSharp:state.hexSharp,
-    streak:state.streak,exposure:state.exposure,bloom:state.bloom,
+    streak:state.streak,streakCross:state.streakCross,exposure:state.exposure,bloom:state.bloom,
     modeSpeed:state.modeSpeed,
   };
 }
