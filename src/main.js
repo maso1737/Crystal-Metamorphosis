@@ -295,6 +295,15 @@ function updateInstances(t, dt){
     const a=state.modeTime[mode]*rotSpeed+sx*Math.PI*2;
     const b=state.modeTime[mode]*rotSpeed*0.7+sy*Math.PI*2;
 
+    // カメラ近接フェード: 近すぎる粒子を near plane でクリップする前にスケール0へ落とす
+    // (フライスルー時のチカチカ＝near-plane clip の除去)。帯 2.0→4.5
+    {
+      const cdx=px-camera.position.x, cdy=py-camera.position.y, cdz=pz-camera.position.z;
+      const cd=Math.sqrt(cdx*cdx+cdy*cdy+cdz*cdz);
+      let cf=(cd-2.0)/2.5; cf=cf<0?0:(cf>1?1:cf);
+      scale*=cf*cf*(3.0-2.0*cf); // smoothstep
+    }
+
     dummy.position.set(px,py,pz);
     dummy.rotation.set(b,a,0);
     dummy.scale.set(scale,scale,scale);

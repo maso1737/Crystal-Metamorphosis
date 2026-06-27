@@ -102,9 +102,9 @@
         float wInRange = step(reach, max(spread, centerBlur));
 
         // Chromatic aberration: offset radius per channel
-        vec2 offR = dir * hr * (1.0 + uCA * 0.05) * effCoC * texel;
+        vec2 offR = dir * hr * (1.0 + uCA * 0.2) * effCoC * texel;
         vec2 offG = dir * hr * effCoC * texel;
-        vec2 offB = dir * hr * (1.0 - uCA * 0.05) * effCoC * texel;
+        vec2 offB = dir * hr * (1.0 - uCA * 0.2) * effCoC * texel;
 
         vec3 sR = texture2D(tDiffuse, vUv + offR).rgb;
         vec3 sG = texture2D(tDiffuse, vUv + offG).rgb;
