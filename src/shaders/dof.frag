@@ -1,7 +1,7 @@
 
     uniform sampler2D tDiffuse, tDepth, uNearTex;
     uniform vec2 uRes;
-    uniform float uFocusDist, uFocalLen, uFstop, uMaxBlur, uCA, uNearBleed, uNearOn, uNear, uFar, uEnabled, uHexAmount;
+    uniform float uFocusDist, uFocalLen, uFstop, uMaxBlur, uCA, uNearBleed, uNearOn, uNear, uFar, uEnabled, uHexAmount, uHexSharp;
     varying vec2 vUv;
 
     #define TAPS 48
@@ -23,10 +23,14 @@
       return coc * 600.0 * uMaxBlur;
     }
 
-    // Hex aperture warp: shrink radius toward hex edges so the kernel
-    // outline is a hexagon, not a circle.
-    float hexWarp(float ang){
-      return 1.0 / max(cos(mod(ang, 1.0471975512) - 0.5235987756), 0.5);
+    // Hex aperture warp: radius as a function of angle traces a hexagon.
+    // base = 1/cos(φ) → 1.0 (flat edge) .. 1.1547 (corner) = true hexagon.
+    // uHexSharp amplifies the corner excursion:
+    //   1 = geometric hexagon (subtle) · 2-3 = bold/pointy · higher = spiky star.
+    float hexWarp(float ang, float sharp){
+      float phi = mod(ang, 1.0471975512) - 0.5235987756; // ±30° from nearest flat
+      float base = 1.0 / cos(phi);                        // 1.0 .. 1.1547
+      return 1.0 + (base - 1.0) * sharp;
     }
     // cheap per-pixel hash → random spiral rotation, breaks up grid aliasing
     float hash21(vec2 p){
@@ -80,7 +84,7 @@
         float fi = float(i) + 0.5;
         float r = sqrt(fi / float(TAPS));      // even area distribution
         float ang = fi * GOLDEN + jitter;      // Vogel spiral + per-pixel rotation
-        float hr = r * mix(1.0, hexWarp(ang), uHexAmount); // 0=丸(真円) 1=六角絞り、中間=角丸六角
+        float hr = r * mix(1.0, hexWarp(ang, uHexSharp), uHexAmount); // 丸⇔六角(uHexAmount) × 尖り(uHexSharp)
         vec2 dir = vec2(cos(ang), sin(ang));
 
         // Sample CoC at this tap to decide its influence

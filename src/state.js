@@ -19,7 +19,7 @@ export const state = {
   exposure:1.0, postProcess:true,
   camMode:'orbit', camDist:28, camFov:55,
   // Physical DoF
-  dofOn:true, dofAutofocus:true, focusDist:25.0, fstop:2.8, focalLen:50, maxBlur:1.0, ca:0.5, nearBleed:0.6, hexShape:1.0,
+  dofOn:true, dofAutofocus:true, focusDist:25.0, fstop:2.8, focalLen:50, maxBlur:1.0, ca:0.5, nearBleed:0.6, hexShape:1.0, hexSharp:2.2,
   tapTimes:[],
 };
 
