@@ -441,6 +441,7 @@ const dofShader={
     uNear:{value:0.1},
     uFar:{value:200.0},
     uEnabled:{value:1.0},
+    uHexAmount:{value:1.0},    // ★ 絞り形状 0=丸 1=六角
   },
   vertexShader:`varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
   fragmentShader:dofFrag
@@ -590,6 +591,7 @@ slider('focallen','focalLen',v=>{dofPass.uniforms.uFocalLen.value=v/1000.0; docu
 slider('maxblur','maxBlur',v=>{dofPass.uniforms.uMaxBlur.value=v;});
 slider('ca','ca',v=>{dofPass.uniforms.uCA.value=v;});
 slider('nearbleed','nearBleed',v=>{dofPass.uniforms.uNearBleed.value=v; document.getElementById('nearbleed-val').textContent=v.toFixed(2);});
+slider('hexshape','hexShape',v=>{dofPass.uniforms.uHexAmount.value=v;});
 document.getElementById('dof-on').addEventListener('change',e=>{
   state.dofOn=e.target.checked;
   dofPass.uniforms.uEnabled.value=e.target.checked?1.0:0.0;
@@ -806,6 +808,7 @@ function applyPreset(p){
   if(p.maxBlur!==undefined){s.maxBlur=p.maxBlur; dofPass.uniforms.uMaxBlur.value=p.maxBlur;}
   if(p.ca!==undefined){s.ca=p.ca; dofPass.uniforms.uCA.value=p.ca;}
   { const nb=(p.nearBleed!==undefined)?p.nearBleed:0.6; s.nearBleed=nb; dofPass.uniforms.uNearBleed.value=nb; }
+  { const hx=(p.hexShape!==undefined)?p.hexShape:1.0; s.hexShape=hx; dofPass.uniforms.uHexAmount.value=hx; }
   if(p.focusDist!==undefined){s.focusDist=p.focusDist; dofPass.uniforms.uFocusDist.value=p.focusDist;}
   if(p.bloom!==undefined){s.bloom=p.bloom; bloomPass.strength=p.bloom;}
   syncUI();
@@ -826,6 +829,7 @@ function syncUI(){
   document.getElementById('bg-from-env').checked=s.bgFromEnv;
   set('streak',s.streak); set('exposure',s.exposure);
   set('fstop',s.fstop); set('maxblur',s.maxBlur); set('ca',s.ca); set('nearbleed',s.nearBleed);
+  set('hexshape', s.hexShape!==undefined?s.hexShape:1.0);
   if(document.getElementById('focallen')){document.getElementById('focallen').value=s.focalLen;document.getElementById('focallen-val').textContent=Math.round(s.focalLen);}
   if(!s.dofAutofocus) set('focusdist',s.focusDist,1);
   if(document.getElementById('bloom')){document.getElementById('bloom').value=s.bloom;document.getElementById('bloom-val').textContent=s.bloom.toFixed(2);}
@@ -846,7 +850,7 @@ function paramsToObj(){
     density:state.density,gemSize:state.gemSize,sizeCurve:state.sizeCurve,
     geometryN:state.geometryN,shape:state.shape,mixEnabled:mixEnabled,mixSet:mixSet.slice(),
     envIntensity:state.envIntensity,bgBlur:state.bgBlur,bgFromEnv:state.bgFromEnv,
-    fstop:state.fstop,focalLen:state.focalLen,maxBlur:state.maxBlur,ca:state.ca,nearBleed:state.nearBleed,focusDist:state.focusDist,
+    fstop:state.fstop,focalLen:state.focalLen,maxBlur:state.maxBlur,ca:state.ca,nearBleed:state.nearBleed,focusDist:state.focusDist,hexShape:state.hexShape,
     streak:state.streak,exposure:state.exposure,bloom:state.bloom,
     modeSpeed:state.modeSpeed,
   };

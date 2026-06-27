@@ -1,7 +1,7 @@
 
     uniform sampler2D tDiffuse, tDepth, uNearTex;
     uniform vec2 uRes;
-    uniform float uFocusDist, uFocalLen, uFstop, uMaxBlur, uCA, uNearBleed, uNearOn, uNear, uFar, uEnabled;
+    uniform float uFocusDist, uFocalLen, uFstop, uMaxBlur, uCA, uNearBleed, uNearOn, uNear, uFar, uEnabled, uHexAmount;
     varying vec2 vUv;
 
     #define TAPS 48
@@ -80,7 +80,7 @@
         float fi = float(i) + 0.5;
         float r = sqrt(fi / float(TAPS));      // even area distribution
         float ang = fi * GOLDEN + jitter;      // Vogel spiral + per-pixel rotation
-        float hr = r * hexWarp(ang);           // hexagonal aperture
+        float hr = r * mix(1.0, hexWarp(ang), uHexAmount); // 0=丸(真円) 1=六角絞り、中間=角丸六角
         vec2 dir = vec2(cos(ang), sin(ang));
 
         // Sample CoC at this tap to decide its influence
