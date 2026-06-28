@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { setupEnvironment } from './env.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
@@ -10,7 +10,6 @@ import { state, PRESETS } from './state.js';
 import { CUTS, CUT_IDS, cutGeometry } from './geometry/cuts.js';
 // GLSL fragment shaders (?raw = 静的文字列として取り込み。エディタで .frag 補完が効く)
 import bgFrag          from './shaders/bg.frag?raw';
-import envFrag         from './shaders/env.frag?raw';
 import streakFrag      from './shaders/streak.frag?raw';
 import dofFrag         from './shaders/dof.frag?raw';
 import nearExtractFrag from './shaders/nearExtract.frag?raw';
@@ -57,35 +56,9 @@ camera.position.set(0, 6, 28);
 camera.lookAt(0, 5, 0);
 
 // ============================================================
-// ★ PMREM + Procedural env map
+// ★ Environment (PMREM / procedural env / HDRI / background) → ./env.js
 // ============================================================
-const pmremGenerator = new THREE.PMREMGenerator(renderer);
-pmremGenerator.compileEquirectangularShader();
-
-function makeProceduralEnvMap(rotY = 0) {
-  const size = 512;
-  const rt = new THREE.WebGLCubeRenderTarget(size, {
-    generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, type: THREE.HalfFloatType,
-  });
-  const envScene = new THREE.Scene();
-  const envMat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    uniforms: { uRot: { value: rotY } },
-    vertexShader: `varying vec3 vPos; void main(){ vPos = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-    fragmentShader: envFrag
-  });
-  envScene.add(new THREE.Mesh(new THREE.SphereGeometry(50,64,32), envMat));
-  const cubeCam = new THREE.CubeCamera(0.1, 100, rt);
-  cubeCam.update(renderer, envScene);
-  const pmrem = pmremGenerator.fromCubemap(rt.texture);
-  rt.dispose();
-  return pmrem.texture;
-}
-
-let currentEnvMap = makeProceduralEnvMap(0);
-let currentEquirect = null;
-scene.environment = currentEnvMap;
-scene.environmentIntensity = 1.0;
+const env = setupEnvironment(renderer, scene, state);
 
 // ============================================================
 // ★ Geometry builders → ./geometry/cuts.js に分離
@@ -258,42 +231,6 @@ function updateInstances(t, dt){
   }
 }
 
-// ============================================================
-// ★ HDRI Upload
-// ============================================================
-const rgbeLoader=new RGBELoader();
-const hdriInfo=document.getElementById('hdri-info');
-
-document.getElementById('hdri-file').addEventListener('change', e=>{
-  const file=e.target.files[0];
-  if(!file||!file.name.toLowerCase().endsWith('.hdr')){hdriInfo.textContent='Error: not a .hdr file';return;}
-  hdriInfo.textContent=`Loading ${file.name}...`;
-  const url=URL.createObjectURL(file);
-  rgbeLoader.load(url, tex=>{
-    tex.mapping=THREE.EquirectangularReflectionMapping;
-    const pmrem=pmremGenerator.fromEquirectangular(tex);
-    if(currentEnvMap&&currentEnvMap.dispose) currentEnvMap.dispose();
-    currentEnvMap=pmrem.texture;
-    scene.environment=currentEnvMap;
-    if(currentEquirect&&currentEquirect.dispose) currentEquirect.dispose();
-    currentEquirect=tex;
-    applyBackground();
-    hdriInfo.textContent=`✓ ${file.name}`;
-    URL.revokeObjectURL(url);
-  }, undefined, ()=>{hdriInfo.textContent='Error'; URL.revokeObjectURL(url);});
-});
-
-function applyBackground(){
-  if(state.bgFromEnv){
-    scene.background=currentEnvMap;
-    scene.backgroundBlurriness=state.bgBlur;
-    if(scene.userData.bgMesh) scene.userData.bgMesh.visible=false;
-  } else {
-    scene.background=new THREE.Color(0x05081a);
-    scene.backgroundBlurriness=0;
-    if(scene.userData.bgMesh) scene.userData.bgMesh.visible=true;
-  }
-}
 
 // ============================================================
 // ★ Post-Processing — 2-pass manual DoF (no feedback loop)
@@ -502,20 +439,7 @@ slider('thickness','thickness',v=>{gemMat.thickness=v;});
 slider('atten','attenuation',v=>{gemMat.attenuationDistance=v;});
 slider('envint','envIntensity',v=>{scene.environmentIntensity=v; gemMat.envMapIntensity=v;});
 slider('bgblur','bgBlur',v=>{if(scene.background&&scene.background.isTexture)scene.backgroundBlurriness=v;});
-slider('envrotate','envRotate',v=>{
-  // Rebuild env map with rotation offset (procedural HDR only)
-  if(!currentEquirect){
-    const old=currentEnvMap;
-    currentEnvMap=makeProceduralEnvMap(v);
-    scene.environment=currentEnvMap;
-    if(state.bgFromEnv){scene.background=currentEnvMap;}
-    if(old&&old.dispose)old.dispose();
-  } else {
-    // For uploaded HDR, adjust scene.backgroundRotation
-    scene.backgroundRotation.y=v;
-    scene.environmentRotation.y=v;
-  }
-});
+slider('envrotate','envRotate',v=>{ env.setRotation(v); });
 slider('fov','camFov',v=>{cam.setFov(v); document.getElementById('fov-val').textContent=Math.round(v);});
 slider('camdist','camDist',v=>{cam.setDist(v); document.getElementById('camdist-val').textContent=Math.round(v);});
 slider('streak','streak');
@@ -647,7 +571,7 @@ document.addEventListener('fullscreenchange',()=>{
 });
 
 // ---------- BG from Env ----------
-document.getElementById('bg-from-env').addEventListener('change',e=>{state.bgFromEnv=e.target.checked; applyBackground();});
+document.getElementById('bg-from-env').addEventListener('change',e=>{state.bgFromEnv=e.target.checked; env.applyBackground();});
 
 // ---------- Post-process ----------
 document.getElementById('pp-on').addEventListener('change',e=>{state.postProcess=e.target.checked;});
@@ -734,7 +658,7 @@ function applyPreset(p){
   if(typeof refreshCutUI==='function') refreshCutUI();
   s.envIntensity=p.envIntensity; scene.environmentIntensity=p.envIntensity; gemMat.envMapIntensity=p.envIntensity;
   s.bgBlur=p.bgBlur; s.bgFromEnv=p.bgFromEnv;
-  applyBackground();
+  env.applyBackground();
   if(scene.background&&scene.background.isTexture)scene.backgroundBlurriness=p.bgBlur;
   s.streak=p.streak; s.exposure=p.exposure;
   // Physical DoF params
