@@ -445,6 +445,8 @@ slider('camdist','camDist',v=>{cam.setDist(v); document.getElementById('camdist-
 slider('streak','streak');
 slider('streakcross','streakCross',v=>{streakPass.uniforms.uCross.value=v;});
 slider('bloom','bloom',v=>{bloomPass.strength=v;});
+slider('beatflash','beatFlash');
+slider('beatdiv','beatDiv',v=>{document.getElementById('beatdiv-val').textContent=Math.round(v);});
 slider('exposure','exposure');
 
 // Physical DoF sliders
@@ -606,10 +608,10 @@ document.getElementById('burst-trigger').addEventListener('click',()=>setMode(2)
 //   window size — mismatch caused the repeating block pattern at capture time.
 //   Fixed here by always setting uRes from renderer.domElement dimensions.
 // ============================================================
-document.getElementById('save-png').addEventListener('click',()=>{
+// 1フレームを 2-pass 経路で描画 (save-png / export 共通)
+function renderOnce(){
   streakPass.uniforms.uRes.value.set(RTW,RTH);
   dofPass.uniforms.uRes.value.set(RTW,RTH);
-  // Fresh render through the 2-pass path so DoF/depth are valid
   if(state.postProcess){
     renderer.setRenderTarget(sceneRT);
     renderer.clear();
@@ -624,14 +626,38 @@ document.getElementById('save-png').addEventListener('click',()=>{
     renderer.setRenderTarget(null);
     renderer.render(scene,camera);
   }
-  // preserveDrawingBuffer keeps pixels alive for synchronous read
-  const dataURL=renderer.domElement.toDataURL('image/png');
+}
+
+// 解像度プリセット
+const EXPORT_RES={
+  '4k':[3840,2160], '1080p':[1920,1080], 'sq4096':[4096,4096], 'sq2048':[2048,2048],
+};
+// 任意解像度で1枚キャプチャ → dataURL (パイプライン全体を一時リサイズ→復元)
+function captureAt(W,H,blackBg){
+  const origPr=renderer.getPixelRatio();
+  const bgMesh=scene.userData.bgMesh;
+  const prevBg=scene.background, prevVis=bgMesh?bgMesh.visible:true;
+  resizePipeline(W,H,1);                       // pr=1 で正確に W×H ピクセル
+  if(blackBg){ if(bgMesh)bgMesh.visible=false; scene.background=new THREE.Color(0x000000); }
+  renderOnce();
+  const url=renderer.domElement.toDataURL('image/png');
+  if(blackBg){ if(bgMesh)bgMesh.visible=prevVis; scene.background=prevBg; }
+  resizePipeline(window.innerWidth, window.innerHeight, origPr);  // 画面サイズへ復元
+  return url;
+}
+
+document.getElementById('save-png').addEventListener('click',()=>{
+  const sel=document.getElementById('export-res');
+  const key=sel?sel.value:'4k';
+  const [W,H]=EXPORT_RES[key]||EXPORT_RES['4k'];
+  const blackBg=!!(document.getElementById('export-black')&&document.getElementById('export-black').checked);
+  const url=captureAt(W,H,blackBg);
   const a=document.createElement('a');
   const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
-  a.download=`crystal_v10_${ts}.png`;
-  a.href=dataURL;
+  a.download=`crystal_${W}x${H}_${ts}.png`;
+  a.href=url;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  toast('📸 PNG saved');
+  toast(`✓ PNG ${W}×${H}`);
 });
 
 // ============================================================
@@ -676,6 +702,8 @@ function applyPreset(p){
   { const hs=(p.hexSharp!==undefined)?p.hexSharp:2.2; s.hexSharp=hs; dofPass.uniforms.uHexSharp.value=hs; }
   if(p.focusDist!==undefined){s.focusDist=p.focusDist; dofPass.uniforms.uFocusDist.value=p.focusDist;}
   if(p.bloom!==undefined){s.bloom=p.bloom; bloomPass.strength=p.bloom;}
+  if(p.beatFlash!==undefined)s.beatFlash=p.beatFlash;
+  if(p.beatDiv!==undefined)s.beatDiv=p.beatDiv;
   syncUI();
 }
 
@@ -697,6 +725,8 @@ function syncUI(){
   set('fstop',s.fstop); set('maxblur',s.maxBlur); set('ca',s.ca); set('nearbleed',s.nearBleed);
   set('hexshape', s.hexShape!==undefined?s.hexShape:1.0);
   set('hexsharp', s.hexSharp!==undefined?s.hexSharp:2.2);
+  if(s.beatFlash!==undefined)set('beatflash',s.beatFlash);
+  if(s.beatDiv!==undefined){set('beatdiv',s.beatDiv); const bd=document.getElementById('beatdiv-val'); if(bd)bd.textContent=Math.round(s.beatDiv);}
   if(document.getElementById('focallen')){document.getElementById('focallen').value=s.focalLen;document.getElementById('focallen-val').textContent=Math.round(s.focalLen);}
   if(!s.dofAutofocus) set('focusdist',s.focusDist,1);
   if(document.getElementById('bloom')){document.getElementById('bloom').value=s.bloom;document.getElementById('bloom-val').textContent=s.bloom.toFixed(2);}
@@ -719,6 +749,7 @@ function paramsToObj(){
     envIntensity:state.envIntensity,bgBlur:state.bgBlur,bgFromEnv:state.bgFromEnv,
     fstop:state.fstop,focalLen:state.focalLen,maxBlur:state.maxBlur,ca:state.ca,nearBleed:state.nearBleed,focusDist:state.focusDist,hexShape:state.hexShape,hexSharp:state.hexSharp,
     streak:state.streak,streakCross:state.streakCross,exposure:state.exposure,bloom:state.bloom,
+    beatFlash:state.beatFlash,beatDiv:state.beatDiv,
     modeSpeed:state.modeSpeed,
   };
 }
@@ -789,6 +820,7 @@ window.addEventListener('keydown',e=>{
 const clock=new THREE.Clock();
 let lastFrameTime=0, lastFpsTime=0, frameCount=0;
 const beatIndicator=document.getElementById('beat-indicator');
+let flashEnv=0;   // ★ ビートフラッシュのエンベロープ (1→0 減衰)
 const fpsEl=document.getElementById('fps');
 
 function animate(){
@@ -803,7 +835,13 @@ function animate(){
     state.lastBeatIdx=beatIdx;
     beatIndicator.classList.add('beat');
     setTimeout(()=>beatIndicator.classList.remove('beat'),80);
+    // ビート分割ごとにフラッシュ発火 (beatDiv=何拍ごと)
+    const div=Math.max(1,Math.round(state.beatDiv));
+    if(beatIdx % div === 0) flashEnv=1.0;
   }
+  // フラッシュ減衰 (≈0.18s) → bloom に瞬間上乗せ
+  flashEnv=Math.max(0, flashEnv - dt/0.18);
+  bloomPass.strength = state.bloom + flashEnv*flashEnv*state.beatFlash;
 
   scene.userData.bg.uniforms.uTime.value=t;
   updateInstances(t,dt);
@@ -857,8 +895,8 @@ bloomPass.strength=state.bloom;
 
 animate();
 
-window.addEventListener('resize',()=>{
-  const w=window.innerWidth, h=window.innerHeight, pr=Math.min(window.devicePixelRatio,2);
+function resizePipeline(w,h,pr){
+  renderer.setPixelRatio(pr);
   camera.aspect=w/h; camera.updateProjectionMatrix();
   renderer.setSize(w,h); composer.setSize(w,h);
   RTW=Math.floor(w*pr); RTH=Math.floor(h*pr);
@@ -873,4 +911,7 @@ window.addEventListener('resize',()=>{
   NRW=Math.max(2,Math.floor(RTW/2)); NRH=Math.max(2,Math.floor(RTH/2));
   nearRTA.setSize(NRW,NRH); nearRTB.setSize(NRW,NRH);
   nearBlurMat.uniforms.uTexel.value.set(1/NRW,1/NRH);
+}
+window.addEventListener('resize',()=>{
+  resizePipeline(window.innerWidth, window.innerHeight, Math.min(window.devicePixelRatio,2));
 });

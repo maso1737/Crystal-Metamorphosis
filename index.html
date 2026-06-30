@@ -316,6 +316,22 @@
     <button class="tap-btn" id="tap">TAP</button>
     <span class="indicator" id="beat-indicator"></span>
   </div>
+  <div class="row"><label>Beat Flash</label><span class="value" id="beatflash-val">0.60</span></div>
+  <input type="range" id="beatflash" min="0" max="2" step="0.05" value="0.6">
+  <div class="row"><label>Flash Every</label><span class="value" id="beatdiv-val">1</span></div>
+  <input type="range" id="beatdiv" min="1" max="4" step="1" value="1">
+  <div style="font-size:9px;opacity:0.4;letter-spacing:0.05em;margin-top:2px">beats per flash &nbsp;·&nbsp; 0 flash = off</div>
+
+  <div class="section-label">Export</div>
+  <div class="row"><label>Resolution</label>
+    <select id="export-res" style="background:rgba(0,0,0,0.3);border:1px solid var(--ui-border);color:var(--ui-accent);border-radius:4px;padding:3px 5px;font-size:10px;font-family:inherit;">
+      <option value="4k">4K UHD 3840×2160</option>
+      <option value="1080p">1080p 1920×1080</option>
+      <option value="sq4096">Square 4096</option>
+      <option value="sq2048">Square 2048</option>
+    </select>
+  </div>
+  <label class="pp-toggle"><input type="checkbox" id="export-black"><span>Black BG (for comp)</span></label>
 
   <div class="actions">
     <button class="action-btn" id="burst-trigger">Burst!</button>

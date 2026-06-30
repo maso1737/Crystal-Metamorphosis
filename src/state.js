@@ -11,6 +11,7 @@ export const state = {
   modeTime:[0,0,0,0],
   modeSpeed:[1.0, 0.15, 1.0, 1.0], // rise, slow, burst, rain
   bpm:128, lastBeatIdx:-1, burstTime:-10,
+  beatFlash:0.6, beatDiv:1,   // ★ ビート同期フラッシュ: 強度 / 何拍ごと
   streak:0.4, streakCross:0.7, bloom:0.5,
   density:0.5, gemSize:1.4, sizeCurve:1.5,
   geometryN:12, shape:'diamond', mixEnabled:false,
