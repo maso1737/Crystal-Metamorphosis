@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { setupEnvironment } from './env.js';
+import JSZip from 'jszip';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
@@ -661,6 +662,66 @@ document.getElementById('save-png').addEventListener('click',()=>{
 });
 
 // ============================================================
+// ★ PNG連番書き出し (固定dtで決定論的 → JSZipで1つのzipに)
+// ============================================================
+function setSeqProgress(text){
+  const el=document.getElementById('seq-progress');
+  if(el) el.textContent=text;
+}
+async function exportSequence(){
+  if(capturing) return;
+  const sel=document.getElementById('export-res');
+  const key=sel?sel.value:'4k';
+  const [W,H]=EXPORT_RES[key]||EXPORT_RES['4k'];
+  const blackBg=!!(document.getElementById('export-black')&&document.getElementById('export-black').checked);
+  const fps=Math.max(1,Math.min(60, parseInt(document.getElementById('seq-fps').value,10)||30));
+  const frames=Math.max(1,Math.min(600, parseInt(document.getElementById('seq-frames').value,10)||60));
+
+  capturing=true;   // 通常ループ停止
+  const btn=document.getElementById('export-seq'); if(btn) btn.disabled=true;
+  const zip=new JSZip();
+  const origPr=renderer.getPixelRatio();
+  const bgMesh=scene.userData.bgMesh;
+  const prevBg=scene.background, prevVis=bgMesh?bgMesh.visible:true;
+  resizePipeline(W,H,1);
+  if(blackBg){ if(bgMesh)bgMesh.visible=false; scene.background=new THREE.Color(0x000000); }
+
+  const dt=1/fps;
+  let t=clock.getElapsedTime();
+  try{
+    for(let i=0;i<frames;i++){
+      t+=dt;
+      renderFrame(t,dt);                                  // 固定dtで等間隔・決定論的
+      const url=renderer.domElement.toDataURL('image/png');
+      zip.file(`frame_${String(i).padStart(4,'0')}.png`, url.split(',')[1], {base64:true});
+      setSeqProgress(`Rendering ${i+1}/${frames}`);
+      await new Promise(r=>setTimeout(r,0));               // ブラウザに制御を返す(フリーズ防止)
+    }
+    setSeqProgress('Zipping...');
+    const blob=await zip.generateAsync({type:'blob'}, m=>{ setSeqProgress(`Zipping ${m.percent.toFixed(0)}%`); });
+    const a=document.createElement('a');
+    const ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+    a.download=`crystal_seq_${W}x${H}_${fps}fps_${frames}f_${ts}.zip`;
+    a.href=URL.createObjectURL(blob);
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    setSeqProgress(`✓ ${frames} frames`);
+    toast(`✓ Sequence ${frames}f @ ${fps}fps`);
+  } catch(err){
+    setSeqProgress('✗ '+(err.message||err));
+  } finally {
+    // 復元
+    if(blackBg){ if(bgMesh)bgMesh.visible=prevVis; scene.background=prevBg; }
+    resizePipeline(window.innerWidth, window.innerHeight, origPr);
+    lastFrameTime=clock.getElapsedTime();   // dt急増を防ぐ
+    capturing=false;
+    if(btn) btn.disabled=false;
+    animate();                              // 通常ループ再開
+  }
+}
+document.getElementById('export-seq').addEventListener('click', exportSequence);
+
+// ============================================================
 // ★ Presets
 // ============================================================
 // PRESETS は ./state.js から import (純データ層)
@@ -821,13 +882,12 @@ const clock=new THREE.Clock();
 let lastFrameTime=0, lastFpsTime=0, frameCount=0;
 const beatIndicator=document.getElementById('beat-indicator');
 let flashEnv=0;   // ★ ビートフラッシュのエンベロープ (1→0 減衰)
+let capturing=false;   // ★ 連番書き出し中フラグ
 const fpsEl=document.getElementById('fps');
 
-function animate(){
-  const t=clock.getElapsedTime();
-  const dt=Math.min(t-lastFrameTime,0.1);
-  lastFrameTime=t;
-
+// 1フレーム分のシミュレーション＋描画 (t=絶対時刻, dt=刻み)。
+// 通常ループ(実時間)と連番書き出し(固定dt)の両方から呼ぶ。
+function renderFrame(t,dt){
   if(state.modeMix<1)state.modeMix=Math.min(1,state.modeMix+dt/0.5);
 
   const beatPeriod=60/state.bpm, beatIdx=Math.floor(t/beatPeriod);
@@ -879,7 +939,14 @@ function animate(){
     renderer.setRenderTarget(null);
     renderer.render(scene,camera);
   }
+}
 
+function animate(){
+  if(capturing) return;            // 連番書き出し中は通常ループを止める
+  const t=clock.getElapsedTime();
+  const dt=Math.min(t-lastFrameTime,0.1);
+  lastFrameTime=t;
+  renderFrame(t,dt);
   frameCount++;
   if(t-lastFpsTime>0.5){fpsEl.textContent=(frameCount/(t-lastFpsTime)).toFixed(0);frameCount=0;lastFpsTime=t;}
   requestAnimationFrame(animate);

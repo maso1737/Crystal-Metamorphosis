@@ -332,6 +332,10 @@
     </select>
   </div>
   <label class="pp-toggle"><input type="checkbox" id="export-black"><span>Black BG (for comp)</span></label>
+  <div class="row"><label>Seq FPS</label><input type="number" id="seq-fps" value="30" min="1" max="60" style="width:56px;background:rgba(0,0,0,0.3);border:1px solid var(--ui-border);color:var(--ui-accent);border-radius:4px;padding:2px 4px;font-size:10px;font-family:inherit;"></div>
+  <div class="row"><label>Seq Frames</label><input type="number" id="seq-frames" value="60" min="1" max="600" style="width:56px;background:rgba(0,0,0,0.3);border:1px solid var(--ui-border);color:var(--ui-accent);border-radius:4px;padding:2px 4px;font-size:10px;font-family:inherit;"></div>
+  <button class="action-btn" id="export-seq" style="width:100%;margin-top:6px;">Export PNG Sequence (.zip)</button>
+  <div id="seq-progress" style="font-size:9px;opacity:0.6;letter-spacing:0.05em;margin-top:4px;min-height:11px;color:var(--ui-accent);"></div>
 
   <div class="actions">
     <button class="action-btn" id="burst-trigger">Burst!</button>
